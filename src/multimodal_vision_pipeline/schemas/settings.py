@@ -1,5 +1,7 @@
 """Service-level vision model settings, read from ``MVP_*`` environment variables."""
 
+from typing import Literal
+
 from pydantic import Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -38,6 +40,9 @@ class VisionSettings(BaseSettings):
     worker_shutdown_grace_seconds: float = Field(default=30.0, ge=0, le=600)
     job_store_max_jobs: int = Field(default=10_000, ge=1, le=1_000_000)
     max_upload_bytes: int = Field(default=MAX_UPLOAD_BYTES, ge=1, le=MAX_UPLOAD_BYTES)
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    log_json: bool = True
+    """Install the redacting JSON log handler at startup; False leaves logging to the host."""
 
     def extraction_config(self) -> ExtractionModelConfig:
         return ExtractionModelConfig(

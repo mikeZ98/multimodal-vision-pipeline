@@ -53,4 +53,9 @@ scripts/audit-attribution.sh       # attribution audit of HEAD history
 - API tests: `create_app(settings, rasterizer=..., extractor=...)`, drive the lifespan with
   `app.router.lifespan_context(app)` and send requests through `httpx.ASGITransport`. Every error
   response is `application/problem+json`; raise a `PipelineError` subclass, never return ad-hoc JSON.
+- Logging: use module loggers and put structured data in `extra=`; job/stage/correlation ids come
+  from `observability.context.bind`, never from string formatting. Never log document bytes, page
+  images, request bodies, extracted values or credentials (the redactor is a safety net, not a
+  licence). Metrics live in a per-app `PipelineMetrics` registry; label values must be bounded
+  (route templates, enum values), never raw paths or ids.
 - Conventional Commits, atomic. The blueprint order starts: chore(config) → feat(schemas) → feat(core) → …

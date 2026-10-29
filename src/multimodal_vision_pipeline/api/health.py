@@ -2,10 +2,11 @@
 
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
 from multimodal_vision_pipeline.api.dependencies import JobsDep, WorkerDep
+from multimodal_vision_pipeline.observability.metrics import PipelineMetrics
 from multimodal_vision_pipeline.schemas import PipelineModel
 
 router = APIRouter(tags=["health"])
@@ -55,3 +56,15 @@ async def readyz(jobs: JobsDep, worker: WorkerDep) -> JSONResponse:
         max_jobs=jobs.max_jobs,
     )
     return JSONResponse(report.model_dump(mode="json"), status_code=200 if ready else 503)
+
+
+@router.get(
+    "/metrics",
+    summary="Prometheus metrics",
+    response_class=Response,
+    responses={200: {"content": {"text/plain": {}}, "description": "Text exposition format"}},
+)
+async def metrics(request: Request) -> Response:
+    registry: PipelineMetrics = request.app.state.metrics
+    body, content_type = registry.render()
+    return Response(body, media_type=content_type)

@@ -17,6 +17,9 @@ from multimodal_vision_pipeline.api.middleware import BodySizeLimitMiddleware
 from multimodal_vision_pipeline.api.uploads import MULTIPART_OVERHEAD_BYTES
 from multimodal_vision_pipeline.core.job_manager import JobManager
 from multimodal_vision_pipeline.core.rasterizer import DocumentRasterizer, Rasterizer
+from multimodal_vision_pipeline.observability.logging import configure_logging
+from multimodal_vision_pipeline.observability.metrics import PipelineMetrics
+from multimodal_vision_pipeline.observability.middleware import CorrelationMiddleware
 from multimodal_vision_pipeline.schemas import VisionSettings
 from multimodal_vision_pipeline.tools.pipeline_worker import PipelineWorker, VisionExtractor
 from multimodal_vision_pipeline.tools.vision_client import VisionClient
@@ -30,20 +33,27 @@ def create_app(
     jobs: JobManager | None = None,
     rasterizer: Rasterizer | None = None,
     extractor: VisionExtractor | None = None,
+    metrics: PipelineMetrics | None = None,
 ) -> FastAPI:
     """Build the service. Collaborators default to production implementations.
 
     A ``VisionClient`` is created (and closed) by the lifespan only when no
-    ``extractor`` is injected; it requires ``MVP_ANTHROPIC_API_KEY``.
+    ``extractor`` is injected; it requires ``MVP_ANTHROPIC_API_KEY``. Each app gets its
+    own metrics registry unless one is passed in.
     """
     config = settings if settings is not None else VisionSettings()
+    app_metrics = metrics if metrics is not None else PipelineMetrics()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if config.log_json:
+            configure_logging(config.log_level)
         owned_client: VisionClient | None = None
         worker_extractor: VisionExtractor
         if extractor is None:
-            owned_client = worker_extractor = VisionClient.from_settings(config)
+            owned_client = worker_extractor = VisionClient.from_settings(
+                config, metrics=app_metrics
+            )
         else:
             worker_extractor = extractor
         # Explicit None checks: an empty JobManager is falsy (it defines __len__).
@@ -54,7 +64,11 @@ def create_app(
             else DocumentRasterizer(max_document_bytes=config.max_upload_bytes)
         )
         worker = PipelineWorker.from_settings(
-            config, jobs=job_store, rasterizer=page_source, extractor=worker_extractor
+            config,
+            jobs=job_store,
+            rasterizer=page_source,
+            extractor=worker_extractor,
+            metrics=app_metrics,
         )
         app.state.services = Services(
             settings=config,
@@ -62,6 +76,7 @@ def create_app(
             rasterizer=page_source,
             extractor=worker_extractor,
             worker=worker,
+            metrics=app_metrics,
         )
         logger.info("pipeline worker started (concurrency %d)", worker.max_concurrency)
         try:
@@ -81,6 +96,10 @@ def create_app(
     app.add_middleware(
         BodySizeLimitMiddleware, max_body_bytes=config.max_upload_bytes + MULTIPART_OVERHEAD_BYTES
     )
+    # Added last, so it is outermost: ids and access logs cover every response,
+    # including problems produced by the body size limit.
+    app.add_middleware(CorrelationMiddleware, metrics=app_metrics)
+    app.state.metrics = app_metrics
     install_problem_handlers(app)
     app.include_router(health.router)
     app.include_router(routes.router)

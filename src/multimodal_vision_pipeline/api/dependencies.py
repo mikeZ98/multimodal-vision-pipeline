@@ -8,6 +8,7 @@ from fastapi import Depends, Request
 from multimodal_vision_pipeline.api.errors import ServiceNotReadyError
 from multimodal_vision_pipeline.core.job_manager import JobManager
 from multimodal_vision_pipeline.core.rasterizer import Rasterizer
+from multimodal_vision_pipeline.observability.metrics import PipelineMetrics
 from multimodal_vision_pipeline.schemas import VisionSettings
 from multimodal_vision_pipeline.tools.pipeline_worker import PipelineWorker, VisionExtractor
 
@@ -19,6 +20,7 @@ class Services:
     rasterizer: Rasterizer
     extractor: VisionExtractor
     worker: PipelineWorker
+    metrics: PipelineMetrics
 
 
 def get_services(request: Request) -> Services:

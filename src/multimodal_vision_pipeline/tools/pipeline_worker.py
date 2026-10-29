@@ -9,6 +9,9 @@ its upload in memory, so at most ``max_queued_jobs`` may be scheduled at once.
 
 import asyncio
 import logging
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Final, Protocol
 from uuid import UUID
 
@@ -27,6 +30,8 @@ from multimodal_vision_pipeline.core.vision_builder import (
     VisionRequest,
     parse_extraction,
 )
+from multimodal_vision_pipeline.observability.context import bind
+from multimodal_vision_pipeline.observability.metrics import PipelineMetrics
 from multimodal_vision_pipeline.schemas import (
     ExtractionModelConfig,
     JobStatusResponse,
@@ -60,6 +65,7 @@ class PipelineWorker:
         max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
         job_timeout_seconds: float = DEFAULT_JOB_TIMEOUT_SECONDS,
         max_queued_jobs: int = DEFAULT_MAX_QUEUED_JOBS,
+        metrics: PipelineMetrics | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be >= 1")
@@ -75,6 +81,7 @@ class PipelineWorker:
         self.max_concurrency = max_concurrency
         self.job_timeout_seconds = job_timeout_seconds
         self.max_queued_jobs = max_queued_jobs
+        self.metrics = metrics if metrics is not None else PipelineMetrics()
         self._slots = asyncio.Semaphore(max_concurrency)
         self._tasks: dict[UUID, asyncio.Task[JobStatusResponse]] = {}
         self._accepting = True
@@ -87,6 +94,7 @@ class PipelineWorker:
         jobs: JobManager,
         rasterizer: Rasterizer,
         extractor: VisionExtractor,
+        metrics: PipelineMetrics | None = None,
     ) -> "PipelineWorker":
         return cls(
             jobs=jobs,
@@ -96,6 +104,7 @@ class PipelineWorker:
             max_concurrency=settings.worker_max_concurrency,
             job_timeout_seconds=settings.worker_job_timeout_seconds,
             max_queued_jobs=max(settings.worker_max_queued_jobs, settings.worker_max_concurrency),
+            metrics=metrics,
         )
 
     # -- background execution -------------------------------------------------
@@ -129,13 +138,14 @@ class PipelineWorker:
         return task
 
     async def _run_bounded(self, job_id: UUID, document: bytes) -> JobStatusResponse:
-        try:
-            async with self._slots:
-                return await self.process(job_id, document)
-        except asyncio.CancelledError:
-            # Cancelled while waiting for a slot: the job never left ``queued``.
-            self._fail(job_id, JobCancelledError("cancelled before processing started"))
-            raise
+        with bind(job_id=str(job_id)):
+            try:
+                async with self._slots:
+                    return await self.process(job_id, document)
+            except asyncio.CancelledError:
+                # Cancelled while waiting for a slot: the job never left ``queued``.
+                self._fail(job_id, JobCancelledError("cancelled before processing started"))
+                raise
 
     async def drain(self, grace_seconds: float) -> None:
         """Stop admitting jobs, let scheduled ones finish for up to ``grace_seconds``,
@@ -161,15 +171,20 @@ class PipelineWorker:
         Raises ``InvalidTransitionError`` without touching the job if it is not queued
         (for example, already being processed elsewhere).
         """
-        self.jobs.begin_rasterizing(job_id)
+        with bind(job_id=str(job_id)):
+            self.jobs.begin_rasterizing(job_id)
+            with self.metrics.tracking_active_job():
+                return await self._process_started(job_id, document)
+
+    async def _process_started(self, job_id: UUID, document: bytes) -> JobStatusResponse:
         try:
             async with asyncio.timeout(self.job_timeout_seconds):
                 return await self._pipeline(job_id, document)
         except PipelineError as exc:
-            logger.info("job %s failed: %s (%s)", job_id, exc.slug, exc)
+            logger.info("job failed: %s (%s)", exc.slug, exc, extra={"error_slug": exc.slug})
             return self._fail(job_id, exc)
         except TimeoutError:
-            logger.warning("job %s exceeded %.0fs", job_id, self.job_timeout_seconds)
+            logger.warning("job exceeded its %.0fs deadline", self.job_timeout_seconds)
             return self._fail(
                 job_id, JobTimeoutError(f"deadline of {self.job_timeout_seconds:g}s exceeded")
             )
@@ -177,48 +192,76 @@ class PipelineWorker:
             self._fail(job_id, JobCancelledError("cancelled during processing"))
             raise
         except Exception:
-            logger.exception("job %s failed unexpectedly", job_id)
+            logger.exception("job failed unexpectedly")
             return self._fail(job_id, PipelineError())
+
+    @contextmanager
+    def _stage(self, name: str) -> Iterator[None]:
+        """Bind the stage for logs, time it, and log its latency when it completes."""
+        start = time.perf_counter()
+        with bind(stage=name), self.metrics.stage(name):
+            yield
+            latency_ms = round((time.perf_counter() - start) * 1000, 2)
+            logger.info("stage %s completed", name, extra={"latency_ms": latency_ms})
 
     async def _pipeline(self, job_id: UUID, document: bytes) -> JobStatusResponse:
         snapshot = self.jobs.get(job_id)
         options = self.jobs.options(job_id)
         mime_type = snapshot.document.mime_type
 
-        page_count = await self.rasterizer.count_pages(document, mime_type)
-        pages: list[RasterizedPage] = [
-            page
-            async for page in self.rasterizer.rasterize(
-                document, mime_type, options.rasterization, page_count=page_count
-            )
-        ]
+        with self._stage("rasterization"):
+            page_count = await self.rasterizer.count_pages(document, mime_type)
+            pages: list[RasterizedPage] = [
+                page
+                async for page in self.rasterizer.rasterize(
+                    document, mime_type, options.rasterization, page_count=page_count
+                )
+            ]
+            self.metrics.rasterized_pages.inc(len(pages))
         self.jobs.begin_extracting(job_id, [p.metadata for p in pages])
 
-        request = await asyncio.to_thread(
-            self.builder.build,
-            pages,
-            options.extraction or self.default_extraction,
-            page_count=page_count,
-            document_kind=options.document_kind,
-        )
-        del pages  # the encoded request now holds the only copy of the page images
-        response = await self.extractor.extract(request)
-        logger.info(
-            "job %s: model %s answered after %d attempt(s), request %s",
-            job_id,
-            response.model,
-            response.attempts,
-            response.request_id,
-        )
-        extraction = parse_extraction(response.text, request)
+        with self._stage("extraction"):
+            request = await asyncio.to_thread(
+                self.builder.build,
+                pages,
+                options.extraction or self.default_extraction,
+                page_count=page_count,
+                document_kind=options.document_kind,
+            )
+            del pages  # the encoded request now holds the only copy of the page images
+            response = await self.extractor.extract(request)
+            logger.info(
+                "model %s answered after %d attempt(s)",
+                response.model,
+                response.attempts,
+                extra={"upstream_request_id": response.request_id, "pages": len(request.images)},
+            )
+            extraction = parse_extraction(response.text, request)
         self.jobs.begin_reconciling(job_id, extraction)
 
-        report = reconcile(extraction, options.reconciliation)
-        return self.jobs.succeed(job_id, report)
+        with self._stage("reconciliation"):
+            report = reconcile(extraction, options.reconciliation)
+            for discrepancy in report.discrepancies:
+                self.metrics.discrepancies.labels(rule_id=discrepancy.rule.value).inc()
+        final = self.jobs.succeed(job_id, report)
+        self._record_outcome(final)
+        logger.info(
+            "job succeeded; reconciliation %s",
+            report.status,
+            extra={"discrepancy_count": len(report.discrepancies)},
+        )
+        return final
+
+    def _record_outcome(self, snapshot: JobStatusResponse) -> None:
+        self.metrics.job_finished(
+            status=snapshot.status.value, mime_type=snapshot.document.mime_type.value
+        )
 
     def _fail(self, job_id: UUID, error: PipelineError) -> JobStatusResponse:
         problem = error.to_problem(instance=job_path(job_id))
         try:
-            return self.jobs.fail(job_id, problem)
-        except InvalidTransitionError:  # already terminal; keep the first outcome
+            snapshot = self.jobs.fail(job_id, problem)
+        except InvalidTransitionError:  # already terminal; keep (and count) the first outcome
             return self.jobs.get(job_id)
+        self._record_outcome(snapshot)
+        return snapshot

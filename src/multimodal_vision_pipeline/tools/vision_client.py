@@ -12,6 +12,7 @@ import json
 import logging
 import random
 import secrets
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -34,6 +35,8 @@ from multimodal_vision_pipeline.core.errors import (
     VisionRefusalError,
 )
 from multimodal_vision_pipeline.core.vision_builder import VisionRequest
+from multimodal_vision_pipeline.observability.context import CORRELATION_HEADER, correlation_id_var
+from multimodal_vision_pipeline.observability.metrics import PipelineMetrics
 from multimodal_vision_pipeline.schemas import VisionModelId, VisionSettings
 
 logger = logging.getLogger(__name__)
@@ -226,6 +229,7 @@ class VisionClient:
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Sleep = asyncio.sleep,
         rng: random.Random | None = None,
+        metrics: PipelineMetrics | None = None,
     ) -> None:
         if not api_key.get_secret_value():
             raise ValueError("api_key is empty")
@@ -234,6 +238,7 @@ class VisionClient:
         self._server_side_fallback = server_side_fallback
         self._sleep = sleep
         self._rng = rng or secrets.SystemRandom()
+        self._metrics = metrics
         self._http = httpx.AsyncClient(
             base_url=base_url,
             transport=transport,
@@ -273,7 +278,17 @@ class VisionClient:
         headers = {"x-api-key": self._api_key.get_secret_value()}
         if self._uses_fallback(request):
             headers["anthropic-beta"] = FALLBACK_BETA
+        if (correlation_id := correlation_id_var.get()) is not None:
+            headers[CORRELATION_HEADER] = correlation_id
         return headers
+
+    def _observe(self, request: VisionRequest, outcome: str, started: float) -> None:
+        if self._metrics is not None:
+            self._metrics.upstream_attempt(
+                model=request.config.model.value,
+                status_code=outcome,
+                seconds=time.perf_counter() - started,
+            )
 
     @staticmethod
     def _timeout(request: VisionRequest) -> httpx.Timeout:
@@ -294,17 +309,21 @@ class VisionClient:
         for attempt in range(1, max_attempts + 1):
             failure: PipelineError
             retry_after: float | None = None
+            started = time.perf_counter()
             try:
                 response = await self._http.post(
                     MESSAGES_PATH, content=body, headers=headers, timeout=timeout
                 )
             except httpx.TimeoutException as exc:
+                self._observe(request, "timeout", started)
                 failure = UpstreamTimeoutError(f"{type(exc).__name__} on attempt {attempt}")
                 retryable = True
             except httpx.TransportError as exc:
+                self._observe(request, "connection_error", started)
                 failure = UpstreamUnavailableError(f"{type(exc).__name__} on attempt {attempt}")
                 retryable = True
             else:
+                self._observe(request, str(response.status_code), started)
                 request_id = response.headers.get("request-id")
                 if response.is_success:
                     try:

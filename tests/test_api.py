@@ -100,6 +100,7 @@ def settings(**overrides: Any) -> VisionSettings:
     base: dict[str, Any] = {
         "anthropic_api_key": SecretStr("sk-test"),
         "worker_shutdown_grace_seconds": 5,
+        "log_json": False,
     }
     return VisionSettings(**(base | overrides))
 
