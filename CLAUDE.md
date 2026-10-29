@@ -58,6 +58,11 @@ scripts/audit-attribution.sh       # attribution audit of HEAD history
   images, request bodies, extracted values or credentials (the redactor is a safety net, not a
   licence). Metrics live in a per-app `PipelineMetrics` registry; label values must be bounded
   (route templates, enum values), never raw paths or ids.
+- Evals (`evals/`): synthetic invoices are drawn with Pillow's bundled font, so labels must be
+  printable ASCII; every perturbation keeps size/mode and maps anchors via `box_transform`;
+  undefined ratios are `None`, never 0 or 1. `python -m multimodal_vision_pipeline.evals` calls the
+  real API (costs money): never from tests, which use an in-process `BenchmarkExtractor` stub or
+  `VisionClient` with `httpx.MockTransport`.
 - Containers: `Dockerfile` (uv builder → slim runtime, UID/GID 10001, tini, read-only-rootfs
   ready), `docker-compose.yml`, allowlist `.dockerignore`. `tests/test_container.py` checks them
   statically; never run Docker from tests. Every `MVP_*` setting must appear in the compose
