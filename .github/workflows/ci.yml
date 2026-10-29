@@ -1,0 +1,140 @@
+# Quality gates and container verification for every push to main and every PR into it.
+#
+# Mirrors the local gates in CLAUDE.md. Needs no secrets: tests are hermetic, and the
+# container smoke test never calls the vision API.
+# Third-party actions are pinned to full commit SHAs; the trailing comment names the release.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# One run per PR (superseded pushes are cancelled) and per main commit (never cancelled,
+# so every commit on main gets a verdict).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  quality:
+    name: Quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout (full history for the attribution audit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # PRs check out GitHub's synthetic merge commit; audit the PR head's history instead.
+      - name: Attribution audit (sole contributor, no AI trailers)
+        env:
+          AUDIT_REV: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: scripts/audit-attribution.sh --history-only "$AUDIT_REV"
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.11.7"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run --no-sync ruff check --output-format=github .
+
+      - name: Ruff format
+        run: uv run --no-sync ruff format --check .
+
+      - name: Mypy (strict)
+        run: uv run --no-sync mypy --strict
+
+      - name: Bandit
+        run: uv run --no-sync bandit -c pyproject.toml -r src
+
+      - name: Pytest (hermetic, branch coverage gate)
+        run: uv run --no-sync pytest --cov-fail-under=90 --cov-report=xml:coverage.xml
+
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  container:
+    name: Container build and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE_TAG: ci
+      # Placeholder only: the smoke test hits /healthz and /readyz, never the vision API.
+      MVP_ANTHROPIC_API_KEY: ci-placeholder-not-a-real-key
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # BuildKit build checks; `# check=error=true` in the Dockerfile makes any finding fatal.
+      - name: Lint Dockerfile
+        run: docker buildx build --check .
+
+      - name: Validate compose file
+        run: docker compose config --quiet
+
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: runtime
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          tags: multimodal-vision-pipeline:ci
+          cache-from: type=gha,scope=container
+          cache-to: type=gha,scope=container,mode=max
+
+      # --wait blocks until the compose healthcheck (/healthz + /readyz) reports healthy,
+      # with the production hardening applied: read-only rootfs, no capabilities, UID 10001.
+      - name: Start service
+        run: docker compose up --detach --no-build --pull never --wait --wait-timeout 120
+
+      - name: Smoke test
+        run: |
+          curl --fail --silent --show-error --max-time 5 \
+            --retry 5 --retry-connrefused --retry-delay 2 \
+            --output "$RUNNER_TEMP/healthz.json" http://127.0.0.1:8000/healthz
+          echo "/healthz -> $(cat "$RUNNER_TEMP/healthz.json")"
+          grep --quiet --line-regexp '{"status":"ok"}' "$RUNNER_TEMP/healthz.json"
+          curl --fail --silent --show-error --max-time 5 http://127.0.0.1:8000/readyz
+          uid="$(docker compose exec -T api id -u)"
+          [[ "$uid" == "10001" ]] || { echo "container runs as UID $uid, expected 10001"; exit 1; }
+
+      - name: Service logs
+        if: ${{ failure() }}
+        run: docker compose logs --no-color --timestamps
+
+      - name: Stop service
+        if: ${{ always() }}
+        run: docker compose down --volumes --remove-orphans

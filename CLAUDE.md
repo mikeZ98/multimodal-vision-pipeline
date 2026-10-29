@@ -64,4 +64,10 @@ scripts/audit-attribution.sh       # attribution audit of HEAD history
   `environment` with the code default; new build inputs must be re-included in `.dockerignore`.
   Keep `UVICORN_WORKERS=1` (the job store is per process); health probes go through
   `python -m multimodal_vision_pipeline.healthcheck` (no curl in the image).
+- CI (`.github/workflows/ci.yml`) runs the Commands above plus a Docker build, BuildKit checks
+  and a compose smoke test; `tests/test_ci.py` checks it statically. Pin every action to a full
+  commit SHA with a `# vX.Y.Z` comment, keep `permissions: contents: read`, use no secrets, and
+  pass `${{ }}` values to scripts via `env:`. A new local gate must also be added to CI.
+  CI audits with `audit-attribution.sh --history-only`, so GitHub-made merge/squash commits and
+  bot PRs (e.g. Dependabot) fail it: integrate locally (rebase/fast-forward) and push.
 - Conventional Commits, atomic. The blueprint order starts: chore(config) → feat(schemas) → feat(core) → …

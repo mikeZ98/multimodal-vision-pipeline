@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1.7
+# check=error=true
 #
 # multimodal-vision-pipeline: production image.
 #
