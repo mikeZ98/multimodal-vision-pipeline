@@ -75,4 +75,8 @@ scripts/audit-attribution.sh       # attribution audit of HEAD history
   pass `${{ }}` values to scripts via `env:`. A new local gate must also be added to CI.
   CI audits with `audit-attribution.sh --history-only`, so GitHub-made merge/squash commits and
   bot PRs (e.g. Dependabot) fail it: integrate locally (rebase/fast-forward) and push.
+- Docs (`README.md`, `docs/architecture.md`, `docs/runbook.md`) are verified against the code by
+  `tests/test_docs.py`: settings and defaults, routes behind every `curl`, the state diagram vs
+  `TRANSITIONS`, error slugs and statuses, metric names, quoted limits, CLI flags. Changing any of
+  those means updating the docs in the same commit.
 - Conventional Commits, atomic. The blueprint order starts: chore(config) → feat(schemas) → feat(core) → …
