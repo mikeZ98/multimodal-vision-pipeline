@@ -47,4 +47,7 @@ scripts/audit-attribution.sh       # attribution audit of HEAD history
   `pdf2image.pdfinfo_from_bytes`/`convert_from_bytes` (see `tests/test_core.py`). Unix sockets are
   allowed only for the asyncio self-pipe; network sockets stay blocked.
 - Job state changes go through `core.job_manager.JobManager`; never mutate a `JobStatusResponse`.
+- `tools.vision_client.VisionClient` calls the Messages API over raw `httpx` (`anthropic-version`
+  `2026-10-21`). In tests pass `transport=httpx.MockTransport(...)`, a recording `sleep` and a
+  seeded `rng`; never let a test wait on real backoff.
 - Conventional Commits, atomic. The blueprint order starts: chore(config) → feat(schemas) → feat(core) → …

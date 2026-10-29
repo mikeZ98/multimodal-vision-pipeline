@@ -61,6 +61,67 @@ class ExtractionParseError(PipelineError):
     slug = "extraction-invalid"
 
 
+class VisionRefusalError(PipelineError):
+    status = 422
+    title = "Vision model declined to process the document"
+    slug = "vision-refusal"
+
+
+# --- upstream vision API ---------------------------------------------------
+class UpstreamError(PipelineError):
+    """The vision API failed. Carries the upstream envelope for logs, not for clients."""
+
+    status = 502
+    title = "Vision service error"
+    slug = "upstream-error"
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        error_type: str | None = None,
+        upstream_status: int | None = None,
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_type = error_type
+        self.upstream_status = upstream_status
+        self.request_id = request_id
+
+
+class UpstreamRateLimitedError(UpstreamError):
+    status = 503
+    title = "Vision service rate limit exceeded"
+    slug = "upstream-rate-limited"
+
+
+class UpstreamOverloadedError(UpstreamError):
+    status = 503
+    title = "Vision service overloaded"
+    slug = "upstream-overloaded"
+
+
+class UpstreamTimeoutError(UpstreamError):
+    status = 504
+    title = "Vision service timed out"
+    slug = "upstream-timeout"
+
+
+class UpstreamUnavailableError(UpstreamError):
+    title = "Vision service unreachable"
+    slug = "upstream-unavailable"
+
+
+class UpstreamRejectedError(UpstreamError):
+    title = "Vision service rejected the request"
+    slug = "upstream-rejected"
+
+
+class UpstreamProtocolError(UpstreamError):
+    title = "Vision service returned a malformed response"
+    slug = "upstream-protocol"
+
+
 # --- reconciliation --------------------------------------------------------
 class ReconciliationOverflowError(PipelineError):
     status = 422
@@ -91,3 +152,15 @@ class JobCapacityError(PipelineError):
     status = 503
     title = "Job store is full"
     slug = "job-capacity"
+
+
+class JobTimeoutError(PipelineError):
+    status = 504
+    title = "Job exceeded its processing deadline"
+    slug = "job-timeout"
+
+
+class JobCancelledError(PipelineError):
+    status = 503
+    title = "Job was cancelled"
+    slug = "job-cancelled"

@@ -1,6 +1,6 @@
 """Service-level vision model settings, read from ``MVP_*`` environment variables."""
 
-from pydantic import Field, SecretStr
+from pydantic import Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from multimodal_vision_pipeline.schemas.extraction import (
@@ -26,7 +26,12 @@ class VisionSettings(BaseSettings):
     vision_effort: Effort = Effort.HIGH
     vision_request_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
     vision_max_retries: int = Field(default=2, ge=0, le=10)
+    vision_server_side_fallback: bool = True
+    """Ask the API to re-run refused requests on its recommended fallback model."""
     anthropic_api_key: SecretStr | None = None
+    anthropic_base_url: HttpUrl = HttpUrl("https://api.anthropic.com")
+    worker_max_concurrency: int = Field(default=4, ge=1, le=64)
+    worker_job_timeout_seconds: float = Field(default=900.0, gt=0, le=3600)
 
     def extraction_config(self) -> ExtractionModelConfig:
         return ExtractionModelConfig(

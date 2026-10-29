@@ -65,7 +65,12 @@ class Rasterizer(Protocol):
     async def count_pages(self, document: bytes, mime_type: DocumentMimeType) -> int: ...
 
     def rasterize(
-        self, document: bytes, mime_type: DocumentMimeType, config: RasterizationConfig
+        self,
+        document: bytes,
+        mime_type: DocumentMimeType,
+        config: RasterizationConfig,
+        *,
+        page_count: int | None = None,
     ) -> AsyncIterator[RasterizedPage]: ...
 
 
@@ -204,10 +209,22 @@ class PageRasterizer(ABC):
         return await asyncio.to_thread(self._count_pages_sync, document, mime_type)
 
     async def rasterize(
-        self, document: bytes, mime_type: DocumentMimeType, config: RasterizationConfig
+        self,
+        document: bytes,
+        mime_type: DocumentMimeType,
+        config: RasterizationConfig,
+        *,
+        page_count: int | None = None,
     ) -> AsyncIterator[RasterizedPage]:
-        """Yield rendered pages in page order, one chunk of bitmaps in memory at a time."""
-        plan = plan_pages(await self.count_pages(document, mime_type), config)
+        """Yield rendered pages in page order, one chunk of bitmaps in memory at a time.
+
+        Pass ``page_count`` when it is already known to skip re-inspecting the document.
+        """
+        if page_count is None:
+            page_count = await self.count_pages(document, mime_type)
+        else:
+            self._check_document(document)
+        plan = plan_pages(page_count, config)
         for first, last in contiguous_chunks(plan, self.chunk_size):
             pages = await asyncio.to_thread(
                 self._render_chunk, document, mime_type, first, last, config
