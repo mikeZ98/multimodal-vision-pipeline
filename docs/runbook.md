@@ -48,7 +48,7 @@ spec:
     runAsGroup: 10001
   containers:
     - name: api
-      image: multimodal-vision-pipeline:0.1.0
+      image: multimodal-vision-pipeline:1.0.0
       ports:
         - containerPort: 8000
       envFrom:

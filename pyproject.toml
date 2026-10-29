@@ -1,6 +1,6 @@
 [project]
 name = "multimodal-vision-pipeline"
-version = "0.1.0"
+version = "1.0.0"
 description = "Async document vision & extraction microservice: PDF/TIFF rasterization, schema-enforced vision LLM extraction and mathematical post-processing validation."
 readme = "README.md"
 license = "MIT"
