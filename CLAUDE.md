@@ -36,7 +36,10 @@ scripts/audit-attribution.sh       # attribution audit of HEAD history
 
 ## Conventions
 
-- Pydantic v2 models: `model_config = ConfigDict(extra="forbid", frozen=True, strict=True)`.
+- Pydantic v2 models: `model_config = ConfigDict(extra="forbid", frozen=True, strict=True)`
+  (inherit `schemas._base.PipelineModel`).
+- Money is integer minor units (`Cents`); rates and quantities are `Decimal`. Never use `float` for
+  amounts. Round derived values once via `ReconciliationPolicy.to_cents`.
 - Tests must be hermetic and in-memory: no outbound network (pytest-socket enforced), no
   subprocesses (never invoke poppler/`pdftoppm` from tests; inject a fake rasterizer), no GUI
   (never call `Image.show()`). Mock the LLM HTTP API with `httpx.MockTransport`.
