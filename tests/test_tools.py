@@ -719,7 +719,7 @@ async def test_upstream_and_parse_failures_fail_the_job(
     assert final.error is not None
     assert final.error.type == PROBLEM_TYPE_PREFIX + slug
     assert final.error.status == status
-    assert final.error.instance == f"/v1/jobs/{job_id}"
+    assert final.error.instance == f"/api/v1/jobs/{job_id}"
 
 
 async def test_rasterization_failure_fails_the_job() -> None:
@@ -926,6 +926,14 @@ async def test_worker_from_settings_and_guards() -> None:
     with pytest.raises(ValueError, match="max_concurrency"):
         PipelineWorker(
             jobs=JobManager(), rasterizer=FakeRasterizer(), extractor=extractor, max_concurrency=0
+        )
+    with pytest.raises(ValueError, match="max_queued_jobs"):
+        PipelineWorker(
+            jobs=JobManager(),
+            rasterizer=FakeRasterizer(),
+            extractor=extractor,
+            max_concurrency=4,
+            max_queued_jobs=2,
         )
     with pytest.raises(ValueError, match="job_timeout_seconds"):
         PipelineWorker(

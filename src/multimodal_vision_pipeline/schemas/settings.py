@@ -3,6 +3,7 @@
 from pydantic import Field, HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from multimodal_vision_pipeline.schemas.document import MAX_UPLOAD_BYTES
 from multimodal_vision_pipeline.schemas.extraction import (
     DEFAULT_VISION_MODEL,
     MAX_OUTPUT_TOKENS,
@@ -32,6 +33,11 @@ class VisionSettings(BaseSettings):
     anthropic_base_url: HttpUrl = HttpUrl("https://api.anthropic.com")
     worker_max_concurrency: int = Field(default=4, ge=1, le=64)
     worker_job_timeout_seconds: float = Field(default=900.0, gt=0, le=3600)
+    worker_max_queued_jobs: int = Field(default=32, ge=1, le=1024)
+    """Jobs scheduled at once (running + waiting); each holds its upload in memory."""
+    worker_shutdown_grace_seconds: float = Field(default=30.0, ge=0, le=600)
+    job_store_max_jobs: int = Field(default=10_000, ge=1, le=1_000_000)
+    max_upload_bytes: int = Field(default=MAX_UPLOAD_BYTES, ge=1, le=MAX_UPLOAD_BYTES)
 
     def extraction_config(self) -> ExtractionModelConfig:
         return ExtractionModelConfig(

@@ -137,3 +137,28 @@ def job_data(**overrides: object) -> dict[str, Any]:
     }
     data.update(overrides)
     return data
+
+
+def model_reply(document_number: str = "FV/2026/10/0042") -> str:
+    """Structured-output text a vision model would return; anchors removed so it fits
+    any page selection."""
+    data = invoice_data(document_number=ef(document_number))
+    data["vendor"]["name"] = ef("ACME Sp. z o.o.")
+    data["total"] = ef(6764)
+    for item in data["line_items"]:
+        item["anchor"] = None
+    del data["model"], data["page_count"]
+    return json.dumps(data)
+
+
+def messages_api_body(text: str, *, model: str = "claude-sonnet-5-5") -> dict[str, Any]:
+    """A successful Messages API response carrying ``text`` as its only text block."""
+    return {
+        "id": "msg_01",
+        "type": "message",
+        "role": "assistant",
+        "model": model,
+        "content": [{"type": "text", "text": text}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 1000, "output_tokens": 200},
+    }

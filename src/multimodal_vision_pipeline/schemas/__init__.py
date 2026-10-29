@@ -15,6 +15,7 @@ from multimodal_vision_pipeline.schemas._base import (
     utc_now,
 )
 from multimodal_vision_pipeline.schemas.api import (
+    API_PREFIX,
     PROBLEM_JSON_MEDIA_TYPE,
     IngestionAccepted,
     IngestionOptions,
@@ -22,6 +23,7 @@ from multimodal_vision_pipeline.schemas.api import (
     JobStatus,
     JobStatusResponse,
     ProblemDetails,
+    job_path,
 )
 from multimodal_vision_pipeline.schemas.document import (
     DEFAULT_DPI,
@@ -66,6 +68,7 @@ from multimodal_vision_pipeline.schemas.settings import VisionSettings
 
 __all__ = [
     "ALL_RULES",
+    "API_PREFIX",
     "DEFAULT_DPI",
     "DEFAULT_MAX_PAGES",
     "DEFAULT_VISION_MODEL",
@@ -117,5 +120,6 @@ __all__ = [
     "VendorInfo",
     "VisionModelId",
     "VisionSettings",
+    "job_path",
     "utc_now",
 ]

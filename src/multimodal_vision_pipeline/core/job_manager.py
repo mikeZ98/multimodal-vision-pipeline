@@ -74,6 +74,10 @@ class JobManager:
         self._jobs: dict[UUID, _Entry] = {}  # insertion order == creation order
         self._by_key: dict[str, UUID] = {}
 
+    @property
+    def max_jobs(self) -> int:
+        return self._max_jobs
+
     def __len__(self) -> int:
         with self._lock:
             return len(self._jobs)
@@ -132,6 +136,11 @@ class JobManager:
     def get(self, job_id: UUID) -> JobStatusResponse:
         with self._lock:
             return self._entry(job_id).snapshot
+
+    def find_by_idempotency_key(self, key: str) -> JobStatusResponse | None:
+        with self._lock:
+            job_id = self._by_key.get(key)
+            return None if job_id is None else self._jobs[job_id].snapshot
 
     def options(self, job_id: UUID) -> IngestionOptions:
         with self._lock:

@@ -24,6 +24,13 @@ from multimodal_vision_pipeline.schemas.reconciliation import (
 )
 
 PROBLEM_JSON_MEDIA_TYPE = "application/problem+json"
+API_PREFIX = "/api/v1"
+
+
+def job_path(job_id: UUID) -> str:
+    """Canonical URL path of a job resource (``Location`` header, problem ``instance``)."""
+    return f"{API_PREFIX}/jobs/{job_id}"
+
 
 UriReference = Annotated[str, StringConstraints(min_length=1, max_length=2048, pattern=r"^\S+$")]
 """RFC 3986 URI reference (absolute or relative); whitespace is never valid."""

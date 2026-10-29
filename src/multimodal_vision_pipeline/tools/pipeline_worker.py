@@ -3,7 +3,8 @@
 Each stage boundary is a ``JobManager`` transition. Any failure, a job deadline or a
 cancellation ends the job in ``failed`` with an RFC 9457 problem, so a job is never
 left stranded in a running state. Concurrency is bounded by a semaphore; jobs
-waiting for a slot stay ``queued``.
+waiting for a slot stay ``queued``. Admission is bounded too: each scheduled job holds
+its upload in memory, so at most ``max_queued_jobs`` may be scheduled at once.
 """
 
 import asyncio
@@ -14,6 +15,7 @@ from uuid import UUID
 from multimodal_vision_pipeline.core.errors import (
     InvalidTransitionError,
     JobCancelledError,
+    JobCapacityError,
     JobTimeoutError,
     PipelineError,
 )
@@ -29,6 +31,7 @@ from multimodal_vision_pipeline.schemas import (
     ExtractionModelConfig,
     JobStatusResponse,
     VisionSettings,
+    job_path,
 )
 from multimodal_vision_pipeline.tools.vision_client import VisionResponse
 
@@ -36,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_CONCURRENCY: Final = 4
 DEFAULT_JOB_TIMEOUT_SECONDS: Final = 900.0
+DEFAULT_MAX_QUEUED_JOBS: Final = 32
 
 
 class VisionExtractor(Protocol):
@@ -55,9 +59,12 @@ class PipelineWorker:
         default_extraction: ExtractionModelConfig | None = None,
         max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
         job_timeout_seconds: float = DEFAULT_JOB_TIMEOUT_SECONDS,
+        max_queued_jobs: int = DEFAULT_MAX_QUEUED_JOBS,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be >= 1")
+        if max_queued_jobs < max_concurrency:
+            raise ValueError("max_queued_jobs must be >= max_concurrency")
         if job_timeout_seconds <= 0:
             raise ValueError("job_timeout_seconds must be > 0")
         self.jobs = jobs
@@ -67,8 +74,10 @@ class PipelineWorker:
         self.default_extraction = default_extraction or ExtractionModelConfig()
         self.max_concurrency = max_concurrency
         self.job_timeout_seconds = job_timeout_seconds
+        self.max_queued_jobs = max_queued_jobs
         self._slots = asyncio.Semaphore(max_concurrency)
         self._tasks: dict[UUID, asyncio.Task[JobStatusResponse]] = {}
+        self._accepting = True
 
     @classmethod
     def from_settings(
@@ -86,6 +95,7 @@ class PipelineWorker:
             default_extraction=settings.extraction_config(),
             max_concurrency=settings.worker_max_concurrency,
             job_timeout_seconds=settings.worker_job_timeout_seconds,
+            max_queued_jobs=max(settings.worker_max_queued_jobs, settings.worker_max_concurrency),
         )
 
     # -- background execution -------------------------------------------------
@@ -93,10 +103,26 @@ class PipelineWorker:
     def active_jobs(self) -> frozenset[UUID]:
         return frozenset(self._tasks)
 
+    @property
+    def accepting(self) -> bool:
+        return self._accepting
+
+    def ensure_capacity(self) -> None:
+        """Raise ``JobCapacityError`` unless another job could be scheduled right now.
+
+        Callers that create a job first should check this before creating it, with no
+        ``await`` in between, so a rejected request never leaves an orphaned job.
+        """
+        if not self._accepting:
+            raise JobCapacityError("the worker is shutting down")
+        if len(self._tasks) >= self.max_queued_jobs:
+            raise JobCapacityError(f"{self.max_queued_jobs} jobs are already scheduled")
+
     def submit(self, job_id: UUID, document: bytes) -> asyncio.Task[JobStatusResponse]:
         """Schedule a queued job; it starts once a concurrency slot is free."""
         if job_id in self._tasks:
             raise InvalidTransitionError(f"job {job_id} is already scheduled")
+        self.ensure_capacity()
         task = asyncio.create_task(self._run_bounded(job_id, document), name=f"job-{job_id}")
         self._tasks[job_id] = task
         task.add_done_callback(lambda _: self._tasks.pop(job_id, None))
@@ -111,8 +137,18 @@ class PipelineWorker:
             self._fail(job_id, JobCancelledError("cancelled before processing started"))
             raise
 
+    async def drain(self, grace_seconds: float) -> None:
+        """Stop admitting jobs, let scheduled ones finish for up to ``grace_seconds``,
+        then cancel whatever is still running."""
+        self._accepting = False
+        tasks = list(self._tasks.values())
+        if tasks and grace_seconds > 0:
+            await asyncio.wait(tasks, timeout=grace_seconds)
+        await self.shutdown()
+
     async def shutdown(self) -> None:
         """Cancel every scheduled job and wait until each has reached a terminal state."""
+        self._accepting = False
         tasks = list(self._tasks.values())
         for task in tasks:
             task.cancel()
@@ -181,7 +217,7 @@ class PipelineWorker:
         return self.jobs.succeed(job_id, report)
 
     def _fail(self, job_id: UUID, error: PipelineError) -> JobStatusResponse:
-        problem = error.to_problem(instance=f"/v1/jobs/{job_id}")
+        problem = error.to_problem(instance=job_path(job_id))
         try:
             return self.jobs.fail(job_id, problem)
         except InvalidTransitionError:  # already terminal; keep the first outcome

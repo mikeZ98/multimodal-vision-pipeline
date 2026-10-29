@@ -50,4 +50,7 @@ scripts/audit-attribution.sh       # attribution audit of HEAD history
 - `tools.vision_client.VisionClient` calls the Messages API over raw `httpx` (`anthropic-version`
   `2026-10-21`). In tests pass `transport=httpx.MockTransport(...)`, a recording `sleep` and a
   seeded `rng`; never let a test wait on real backoff.
+- API tests: `create_app(settings, rasterizer=..., extractor=...)`, drive the lifespan with
+  `app.router.lifespan_context(app)` and send requests through `httpx.ASGITransport`. Every error
+  response is `application/problem+json`; raise a `PipelineError` subclass, never return ad-hoc JSON.
 - Conventional Commits, atomic. The blueprint order starts: chore(config) → feat(schemas) → feat(core) → …
