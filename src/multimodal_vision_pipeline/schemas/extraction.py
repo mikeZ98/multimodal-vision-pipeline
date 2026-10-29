@@ -161,8 +161,9 @@ class TaxLine(PipelineModel):
 class ExtractionResult(PipelineModel):
     """Structured extraction of an invoice, receipt or financial table.
 
-    A ``complete`` result has a currency and a total. Every anchor must point at a
-    page that exists in the rasterized document.
+    ``page_count`` is the number of pages in the source document (a page selection
+    may render fewer); anchors carry source page numbers and must fall within it.
+    A ``complete`` result has a currency and a total.
     """
 
     document_kind: DocumentKind

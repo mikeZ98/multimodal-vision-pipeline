@@ -62,7 +62,7 @@ select = [
 ignore = ["PLR0913", "TRY003"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "PLR2004", "ARG001", "FBT"]
+"tests/**" = ["S101", "S105", "S106", "PLR2004", "ARG001", "ARG002", "FBT"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["multimodal_vision_pipeline"]
@@ -107,6 +107,7 @@ addopts = [
   "--strict-markers",
   "--strict-config",
   "--disable-socket",
+  "--allow-unix-socket",  # asyncio self-pipe only; AF_INET/AF_INET6 stay blocked
   "--cov=multimodal_vision_pipeline",
   "--cov-branch",
   "--cov-report=term-missing",

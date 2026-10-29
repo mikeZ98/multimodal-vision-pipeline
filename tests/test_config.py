@@ -170,7 +170,8 @@ def test_pytest_hermetic_and_strict(tool: dict[str, Any]) -> None:
     ini = tool["pytest"]["ini_options"]
     addopts = set(ini["addopts"])
     assert {"--strict-markers", "--strict-config", "--disable-socket", "--cov-branch"} <= addopts
-    assert "--allow-unix-socket" not in addopts
+    # Unix sockets are local IPC (asyncio self-pipe); network hosts must never be allowed.
+    assert not any(opt.startswith("--allow-hosts") for opt in addopts)
     assert ini["asyncio_mode"] == "auto"
     assert ini["filterwarnings"][0] == "error"
 

@@ -114,12 +114,13 @@ class JobStatusResponse(PipelineModel):
         numbers = [p.page_number for p in self.pages]
         if numbers != sorted(set(numbers)):
             raise ValueError("pages must be unique and in ascending page order")
-        if (
-            self.extraction is not None
-            and self.pages
-            and self.extraction.page_count != len(numbers)
-        ):
-            raise ValueError("extraction page_count disagrees with rasterized pages")
+        if self.extraction is not None and self.pages:
+            rendered = set(numbers)
+            if max(rendered) > self.extraction.page_count:
+                raise ValueError("rasterized pages exceed the extraction page_count")
+            for anchor in self.extraction.anchors():
+                if anchor.page_number not in rendered:
+                    raise ValueError(f"anchor references page {anchor.page_number}, not rasterized")
         match self.status:
             case JobStatus.SUCCEEDED:
                 if self.extraction is None or self.reconciliation is None or self.error:

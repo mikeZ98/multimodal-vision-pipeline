@@ -43,4 +43,8 @@ scripts/audit-attribution.sh       # attribution audit of HEAD history
 - Tests must be hermetic and in-memory: no outbound network (pytest-socket enforced), no
   subprocesses (never invoke poppler/`pdftoppm` from tests; inject a fake rasterizer), no GUI
   (never call `Image.show()`). Mock the LLM HTTP API with `httpx.MockTransport`.
+  Use `core.rasterizer.FakeRasterizer`; exercise the PDF path by monkeypatching
+  `pdf2image.pdfinfo_from_bytes`/`convert_from_bytes` (see `tests/test_core.py`). Unix sockets are
+  allowed only for the asyncio self-pipe; network sockets stay blocked.
+- Job state changes go through `core.job_manager.JobManager`; never mutate a `JobStatusResponse`.
 - Conventional Commits, atomic. The blueprint order starts: chore(config) → feat(schemas) → feat(core) → …
