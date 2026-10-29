@@ -1,0 +1,54 @@
+# Build context allowlist: exclude everything, then re-include only what the image builds
+# from. The denylist at the end is applied last, so it wins even inside re-included trees.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!src/
+!docker/uvicorn-logging.json
+
+# Caches, bytecode and virtualenvs
+.cache/
+**/__pycache__/
+**/*.py[cod]
+**/.mypy_cache/
+**/.ruff_cache/
+**/.pytest_cache/
+**/.hypothesis/
+.venv/
+**/.venv/
+venv/
+build/
+dist/
+**/*.egg-info/
+
+# Tests and coverage artifacts
+tests/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# VCS, hooks, editor and agent metadata
+.git/
+.gitignore
+.githooks/
+.claude/
+.idea/
+.vscode/
+**/.DS_Store
+
+# Local environment and secrets
+.env
+.env.*
+**/.env
+**/.env.*
+.envrc
+.envrc.local
+**/*.pem
+**/*.key
+**/*.p12
+**/*.crt
+**/id_rsa*
+**/secrets/

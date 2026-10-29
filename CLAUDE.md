@@ -58,4 +58,10 @@ scripts/audit-attribution.sh       # attribution audit of HEAD history
   images, request bodies, extracted values or credentials (the redactor is a safety net, not a
   licence). Metrics live in a per-app `PipelineMetrics` registry; label values must be bounded
   (route templates, enum values), never raw paths or ids.
+- Containers: `Dockerfile` (uv builder → slim runtime, UID/GID 10001, tini, read-only-rootfs
+  ready), `docker-compose.yml`, allowlist `.dockerignore`. `tests/test_container.py` checks them
+  statically; never run Docker from tests. Every `MVP_*` setting must appear in the compose
+  `environment` with the code default; new build inputs must be re-included in `.dockerignore`.
+  Keep `UVICORN_WORKERS=1` (the job store is per process); health probes go through
+  `python -m multimodal_vision_pipeline.healthcheck` (no curl in the image).
 - Conventional Commits, atomic. The blueprint order starts: chore(config) → feat(schemas) → feat(core) → …

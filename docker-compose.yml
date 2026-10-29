@@ -1,0 +1,92 @@
+# multimodal-vision-pipeline: single-node deployment.
+#
+#   export MVP_ANTHROPIC_API_KEY=...   # required; never commit it
+#   docker compose up --build
+#
+# Every MVP_* variable maps 1:1 to a VisionSettings field; the defaults below match the code.
+
+name: multimodal-vision-pipeline
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: multimodal-vision-pipeline:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    ports:
+      # Loopback by default; put a TLS-terminating proxy in front for remote access.
+      - "${PUBLISH_ADDRESS:-127.0.0.1}:${PUBLISH_PORT:-8000}:8000"
+    environment:
+      MVP_ANTHROPIC_API_KEY: ${MVP_ANTHROPIC_API_KEY:?set MVP_ANTHROPIC_API_KEY}
+      MVP_ANTHROPIC_BASE_URL: ${MVP_ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      MVP_VISION_MODEL: ${MVP_VISION_MODEL:-claude-sonnet-5-5}
+      MVP_VISION_MAX_TOKENS: ${MVP_VISION_MAX_TOKENS:-16000}
+      MVP_VISION_EFFORT: ${MVP_VISION_EFFORT:-high}
+      MVP_VISION_REQUEST_TIMEOUT_SECONDS: ${MVP_VISION_REQUEST_TIMEOUT_SECONDS:-120}
+      MVP_VISION_MAX_RETRIES: ${MVP_VISION_MAX_RETRIES:-2}
+      MVP_VISION_SERVER_SIDE_FALLBACK: ${MVP_VISION_SERVER_SIDE_FALLBACK:-true}
+      MVP_WORKER_MAX_CONCURRENCY: ${MVP_WORKER_MAX_CONCURRENCY:-4}
+      MVP_WORKER_JOB_TIMEOUT_SECONDS: ${MVP_WORKER_JOB_TIMEOUT_SECONDS:-900}
+      MVP_WORKER_MAX_QUEUED_JOBS: ${MVP_WORKER_MAX_QUEUED_JOBS:-32}
+      MVP_WORKER_SHUTDOWN_GRACE_SECONDS: ${MVP_WORKER_SHUTDOWN_GRACE_SECONDS:-30}
+      MVP_JOB_STORE_MAX_JOBS: ${MVP_JOB_STORE_MAX_JOBS:-10000}
+      MVP_MAX_UPLOAD_BYTES: ${MVP_MAX_UPLOAD_BYTES:-52428800}
+      MVP_LOG_LEVEL: ${MVP_LOG_LEVEL:-INFO}
+      MVP_LOG_JSON: ${MVP_LOG_JSON:-true}
+      # One process: the job store is in memory (see Dockerfile). Scale with replicas.
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-1}
+      UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN: ${UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN:-10}
+      UVICORN_FORWARDED_ALLOW_IPS: ${UVICORN_FORWARDED_ALLOW_IPS:-127.0.0.1}
+    # Hardening: immutable rootfs, no capabilities, no privilege escalation.
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      # pdf2image spools each PDF to a temp file for pdfinfo/pdftoppm: room for
+      # MVP_WORKER_MAX_CONCURRENCY uploads of MVP_MAX_UPLOAD_BYTES. Counts against memory.
+      - /tmp:rw,noexec,nosuid,nodev,size=256m,mode=1777
+    deploy:
+      resources:
+        # Rasterization is the spike: decoded pages are width x height x 3 bytes each,
+        # times concurrent jobs. The limit caps a hostile document at an OOM kill of
+        # this container instead of the host.
+        limits:
+          cpus: "2.0"
+          memory: 2g
+          pids: 256
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+    healthcheck:
+      # Healthy = alive (/healthz) and accepting work (/readyz returns 503 while
+      # draining or at queue capacity).
+      test:
+        - CMD
+        - python
+        - -m
+        - multimodal_vision_pipeline.healthcheck
+        - /healthz
+        - /readyz
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+      start_interval: 2s
+    # SIGTERM -> uvicorn drains connections (UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN), then the
+    # lifespan drains jobs (MVP_WORKER_SHUTDOWN_GRACE_SECONDS); SIGKILL only after both.
+    stop_signal: SIGTERM
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
