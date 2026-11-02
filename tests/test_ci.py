@@ -215,7 +215,6 @@ class TestQualityJob:
         assert '"${1:-}" == "--history-only"' in script
         loop = script[script.index("count=0") :]
         assert "policy_check_identity" in loop
-        assert "policy_check_message" in loop
         assert "((check_identity))" not in loop, "the flag must only skip the local identity"
         hook = (ROOT / ".githooks" / "pre-push").read_text(encoding="utf-8")
         assert "--history-only" not in hook, "locally the next commit's identity is checked too"

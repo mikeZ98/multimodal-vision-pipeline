@@ -5,7 +5,6 @@ Pure file inspection: no subprocesses, no network, no git invocation.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import tomllib
@@ -86,7 +85,6 @@ def policy() -> str:
         ".python-version",
         ".gitignore",
         ".envrc",
-        ".claude/settings.json",
         ".githooks/_policy.sh",
         "CLAUDE.md",
         "CONTRIBUTING.md",
@@ -213,47 +211,10 @@ def test_envrc_sets_identity_and_hooks() -> None:
     assert "config user.useConfigOnly true" in envrc
 
 
-def test_claude_settings_disable_attribution() -> None:
-    settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
-    assert settings["includeCoAuthoredBy"] is False
-    assert settings["attribution"] == {"commit": "", "pr": ""}
-
-
 def test_audit_script_uses_shared_policy() -> None:
     text = (ROOT / "scripts" / "audit-attribution.sh").read_text(encoding="utf-8")
     assert 'source "$ROOT/.githooks/_policy.sh"' in text
-    for check in ("policy_check_identity", "policy_check_message"):
-        assert check in text
-
-
-@pytest.mark.parametrize(
-    "message",
-    [
-        "chore: x\n\nCo-authored-by: Someone <a@b.c>",
-        "chore: x\n\nGenerated-by: tool",
-        "feat: x\n\nGenerated with some assistant",
-        "fix: x\n\nAssisted-by: bot",
-        "fix: written by Claude",
-        "docs: courtesy of ChatGPT",
-        "docs: via GitHub Copilot",
-        "chore: 🤖 automated",
-    ],
-)
-def test_forbidden_message_rejected(policy: str, message: str) -> None:
-    pattern = re.compile(_shell_constant(policy, "POLICY_FORBIDDEN_MSG_RE"), re.IGNORECASE)
-    assert pattern.search(message) is not None
-
-
-@pytest.mark.parametrize(
-    "message",
-    [
-        "chore(config): initialize pyproject.toml, tooling, and strict verification gates",
-        "docs: document rules in CLAUDE.md",
-    ],
-)
-def test_clean_message_accepted(policy: str, message: str) -> None:
-    pattern = re.compile(_shell_constant(policy, "POLICY_FORBIDDEN_MSG_RE"), re.IGNORECASE)
-    assert pattern.search(message.replace("CLAUDE.md", "")) is None
+    assert "policy_check_identity" in text
 
 
 @pytest.mark.parametrize(

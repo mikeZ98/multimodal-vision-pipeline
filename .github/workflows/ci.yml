@@ -38,7 +38,7 @@ jobs:
           persist-credentials: false
 
       # PRs check out GitHub's synthetic merge commit; audit the PR head's history instead.
-      - name: Attribution audit (sole contributor, no AI trailers)
+      - name: Identity audit (sole contributor)
         env:
           AUDIT_REV: ${{ github.event.pull_request.head.sha || github.sha }}
         run: scripts/audit-attribution.sh --history-only "$AUDIT_REV"
