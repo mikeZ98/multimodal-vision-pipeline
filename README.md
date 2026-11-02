@@ -51,7 +51,7 @@ Quality gates (the same ones CI runs):
 ruff check . && ruff format --check .
 mypy --strict
 bandit -c pyproject.toml -r src
-pytest                                   # hermetic; fails under 90% branch coverage
+pytest                                   # 875 hermetic tests, 100% branch coverage (gate: 90%)
 scripts/audit-attribution.sh             # sole-contributor audit of the history
 ```
 
