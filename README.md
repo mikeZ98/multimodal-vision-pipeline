@@ -1,5 +1,12 @@
 # multimodal-vision-pipeline
 
+[![CI](https://github.com/mikeZ98/multimodal-vision-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/mikeZ98/multimodal-vision-pipeline/actions/workflows/ci.yml)
+[![Python 3.12 | 3.13](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](pyproject.toml)
+[![Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](pyproject.toml)
+[![mypy strict](https://img.shields.io/badge/types-mypy%20strict-blue.svg)](pyproject.toml)
+[![Network-free tests](https://img.shields.io/badge/network--free-pytest--socket-brightgreen.svg)](pyproject.toml)
+[![Committer mikeZ98](https://img.shields.io/badge/committer-mikeZ98-lightgrey.svg)](https://github.com/mikeZ98/multimodal-vision-pipeline/commits/main)
+
 Asynchronous document vision and extraction microservice. Upload a PDF, TIFF, PNG or JPEG;
 the service rasterizes it page by page, asks a vision model for a schema-validated extraction
 (vendor, dates, line items, taxes, totals, each with a confidence and a page anchor), and then
