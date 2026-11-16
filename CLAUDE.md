@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # CLAUDE.md
 
 ## Git commit policy
