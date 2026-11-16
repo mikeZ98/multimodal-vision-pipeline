@@ -203,9 +203,11 @@ def test_policy_identity(policy: str) -> None:
     assert f'readonly POLICY_ALLOWED_EMAIL="{ALLOWED_EMAIL}"' in policy
 
 
-def test_envrc_sets_identity_and_hooks() -> None:
+def test_envrc_sets_identity_and_leaves_hooks_global() -> None:
     envrc = (ROOT / ".envrc").read_text(encoding="utf-8")
-    assert "config core.hooksPath .githooks" in envrc
+    # .githooks/* are chained by the global git dispatcher (hooks-unify); an
+    # .envrc-level core.hooksPath override would bypass the global policy.
+    assert not re.search(r"^[^#\n]*config\s+(--local\s+)?core\.hooksPath", envrc, re.MULTILINE)
     assert f'config user.name "{ALLOWED_NAME}"' in envrc
     assert f'config user.email "{ALLOWED_EMAIL}"' in envrc
     assert "config user.useConfigOnly true" in envrc
